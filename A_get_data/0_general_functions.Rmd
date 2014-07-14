@@ -1,0 +1,122 @@
+
+```{r functions to label each daily records with date representing season/month/year}
+
+library(lubridate)
+
+to.season<-function(d,return.type="date") {           #,out.fmt="seasons"
+     x<-data.frame(date=d,year=year(d),month=month(d))  # ,season=time2season(d,out.fmt=out.fmt))  
+     
+     x[x$month>=12,"year"]<-x[x$month>=12,"year"]+1
+#      x$season.num<-sapply(x$season, function(x) {if(x=="autumn") 1
+#                                                  else if (x=="winter") 2
+#                                                  else if (x=="spring") 3
+#                                                  else if (x=="summer") 4 })
+     x[,c("season.date","season")]<-matrix(unlist(
+          lapply(x$month, function(y) {
+               if(y %in% 9:11) c("11/28","fall")
+               else if (y %in% c(12,1:2)) c("2/28","winter")
+               else if (y %in% 3:5) c("5/28","spring") 
+               else if (y %in% 6:8) c("8/28","summer")})),ncol=2,byrow=T)
+     x$season.date<-as.Date(paste0(x$year,"/",x$season.date))
+     if (return.type=="date")
+          return(x[,"season.date"])  
+     else if (return.type=="season")
+          return(x[,"season"])  
+     else
+          return(as.data.frame(x[,c("season","season.date","year")]) )  
+}
+to.water.year<-function(d,date.only=T) {
+     x<-data.frame(date=d,year=year(d),month=month(d))
+     x[x$month>=10,"year"]<-x[x$month>=10,"year"]+1
+     x$water.date<-as.Date(paste0(x$year,"/9/30"))
+     if (!date.only)
+          return(as.data.frame(x[,c("year","water.date")]))
+     else
+          return(x[,"water.date"])
+}
+to.month<-function(d) {
+     return(month.date<-as.Date(paste0(year(d),"/",month(d),"/1")))
+}
+
+```
+
+
+```{r }
+library(reshape2)
+
+
+melt.3d<-function(a) {
+#      out<-melt(a[,,1])
+#      names(out)<-c("date","site_no",dimnames(a)[[3]][1])
+#      
+     x<-data.frame(id=1:dim(a)[[2]],site_no=dimnames(a)[[2]],stringsAsFactors=F)
+     dimnames(a)[[2]]<-x$id
+     out<-melt(a[,,1])
+     names(out)<-c("date","id",dimnames(a)[[3]][1])
+     out<-merge(out,x,by="id",sort=F)
+     out<-out[,c("date","site_no",dimnames(a)[[3]][1])]
+     for (i in 2:dim(a)[3]) {
+          m<-melt(a[,,i])
+          out[,dimnames(a)[[3]][i]]<-m[,3]
+     }
+     return(out)     
+}
+```
+
+
+```{r goodness of fit/validation functions}
+
+library(topmodel)
+library(USGSwsStats)
+
+CV.error<-function(obs,pred) {
+     sd(pred-obs)/mean(obs)
+}
+bias<-function(obs,pred) {
+     b<-mean(pred)-mean(obs)
+     return(list(bias=b,percent.bias=b/mean(obs)*100))
+}
+goodness<-function(df=NULL,obs=NULL,pred=NULL) {
+     if(is.null(obs) | is.null(pred)){
+          if(is.null(df)){
+               print("ERROR: must define obs and pred vectors, 
+                     or data frame w/ obs and pred columns")
+               return(NULL)
+          }
+          else{
+               obs<-df$obs
+               pred<-df$pred
+               }
+     }
+     f<-data.frame(sample.n=length(obs),mean=mean(obs))
+     f$RMSE<-rmse(obs,pred)
+     f$NSEff<-NSeff(obs,pred)
+     f$bias<-mean(pred)-mean(obs)
+     f$percent.bias<-(mean(pred)-mean(obs))/mean(obs)*100
+     f$pearsonR<-cor(obs,pred,method="pearson")
+     f$CV.error<-sd(pred-obs)/mean(obs)
+     return(round(f,3))
+}
+
+```
+
+```{r nonzero function for log values ~0 }
+non.zero<-function(x) {
+     vapply(x,FUN.VALUE=1,FUN=function(x1) {
+          if (is.na(x1) || is.nan(x1) || x1<=0)  
+               return(10^-6)
+          else return(x1)
+     })
+}
+```
+
+```{r}
+# function for pearson correlation (http://www2.warwick.ac.uk/fac/sci/moac/people/students/peter_cock/r/iris_plots/)
+panel.pearson <- function(x, y, ...) {
+  horizontal <- (par("usr")[1] + par("usr")[2]) / 2; 
+  vertical <- (par("usr")[3] + par("usr")[4]) / 2; 
+  text(horizontal, vertical, format(cor(x,y), digits=2)) 
+}
+
+```
+

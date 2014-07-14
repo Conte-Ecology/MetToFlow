@@ -1,0 +1,33 @@
+### pull data and some basic clean up
+```{r pull data and some basic clean up, results='hold'}
+
+setwd(flow_data_dir)
+load()
+
+
+load("C:/ALR/Models/CTRflows3/03-2014 reg with met data/yearly_q_w_basin_and_met.Rdata")
+q.w.precip<-q[!is.na(q$precip_total) & !is.na(q$PercentSandy),]
+
+# q.w.precip[is.nan(q.w.precip$Wetland),]
+#fix rows w/ na values for wetland/water
+q.w.precip[q.w.precip$FEATUREID ==10311356,c("Wetland","Water")]<-0
+
+#remove sites w/ tidal influence
+q.w.precip<-q.w.precip[!(q.w.precip$site_no %in% c("01103220","01102029")),]
+          # sort(unique(q.w.precip$site_no))
+
+info.cols<-c("FEATUREID","site_no","water_year","n.annual.records","station_nm","huc4",
+             "dec_lat_va","dec_long_va","dec_coord_datum_cd","huc_cd","met_filename","precip_months_count") #,"site.index")
+non.std.cols<-c("TNC_DamCount","deg_barr_1","deg_barr_2","deg_barr_3","deg_barr_4","deg_barr_6","deg_barr_7" )
+std.cols<-names(q.w.precip[,!(names(q.w.precip) %in% info.cols | names(q.w.precip) %in% non.std.cols)])
+q.w.precip<-q.w.precip[,c(info.cols,non.std.cols,std.cols)]
+
+#create log transformed, standardized, and standardized log transformed data sets
+# str(q.w.precip[,!(names(q.w.precip) %in% info.cols)])
+q.std<-q.log.std<-q.log<-q.w.precip[,c(info.cols,non.std.cols)]
+q.std[,std.cols]<-apply(q.w.precip[,std.cols],MARGIN=c(2),FUN=std)
+q.log.std[,std.cols]<-apply(q.w.precip[,std.cols],MARGIN=c(2),FUN=std,trans=log.nonzero)
+q.log[,std.cols]<-apply(q.w.precip[,std.cols],MARGIN=c(2),FUN=log.nonzero)
+# View(q.log)
+
+```

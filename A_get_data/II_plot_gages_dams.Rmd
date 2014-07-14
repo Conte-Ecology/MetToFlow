@@ -1,0 +1,158 @@
+
+```{r plot gages dams}
+library(sp)
+library(maptools)
+library(rgeos)
+library(rgdal)
+library(reshape2)
+
+proj4.NHD<-"+proj=longlat +ellps=GRS80 +datum=NAD83 +no_defs"
+
+data_dir<-"C:/ALR/Data"
+model_data_dir<-"C:/ALR/Model_processed_data"
+flow_data_dir<-"C:/ALR/Model_processed_data/flow_daily"
+zonal_stats_dir<-"C:/ALR/Models_from_others/Kyle/NH NY NHDplus basin zonal stats KO"
+
+```
+
+```{r this script s end results}
+
+
+# gages_spatial.Rdata         contains gages.spatial
+# gages_char_spatial.Rdata    contains gages.char.spatial
+# gages_char.csv              from gages.char.spatial@data
+
+# setwd(flow_data_dir)
+# gages.plotted<-read.csv("gages_plotted_info.csv")
+```
+
+
+
+```{r plot gages, determine which are in buffer, and determine NHDplus catchment for each gage}
+#create spatialpoint object from coordinates (coordinates are listed in the order long, lat)
+gages.spatial<-SpatialPointsDataFrame(coords=as.matrix(gages[,c("dec_long_va","dec_lat_va")]), 
+                      data=gages,
+                      proj4string=CRS(proj4.NHD),
+                      match.ID=F)
+par(mfrow=c(1,1))
+plot(gages.spatial)
+
+
+#load buffer, 100 km around CT R states, not including Cape Cod and Long Island
+buffer<-readShapePoly(file.path(model_data_dir,"flow_gages","ctr_states_buffer_no_islands2"),proj4string=CRS(proj4.NHD))
+
+in.buffer<-!is.na(over(gages.spatial,buffer)[,1])
+gages.spatial<-gages.spatial[in.buffer,]
+# nrow(gages.spatial)
+# > nrow(gages.spatial)
+# including Long Island and Cape Cod, western New York, eastern Maine
+# 335
+# within buffer  
+# 244
+plot(gages.spatial,add=T,col="red")
+
+#load NE/NY catchments
+catchments<-readShapePoly(file.path(data_dir,"StreamData/NHDplus/NHDPlusCatchment/NENY/Catchment"),proj4string=CRS(proj4.NHD),IDvar="FEATUREID")
+match<-over(gages.spatial,catchments)
+nrow(match)
+length(unique(match$FEATUREID))
+
+gages.spatial@data$FEATUREID<-match$FEATUREID
+sum(!is.na(gages.spatial$FEATUREID))
+sum(is.na(gages.spatial$FEATUREID))
+
+
+```
+
+
+```{r load basin char zonal stats}
+
+####move this to do earlier w/ gages stats
+#load basin attribute data 
+
+load(file.path(zonal_stats_dir,"NENY_CovariateData_2014-01-23.RData"))
+
+basin.stats1<-UpstreamStats[,c("FEATUREID","Forest","Herbacious","Agriculture",
+                              "Developed","DevelopedNotOpen","Impervious",
+                              "AnnualTmaxC","AnnualTminC",
+                              "AnnualPrcpMM","SummerPrcpMM","WinterPrcpMM",
+                              "DrainageClass","HydrologicGroupAB","HydrologicGroupCD","SurficialCoarseC","PercentSandy",
+                              "ReachElevationM","BasinElevationM","ReachSlopePCNT","BasinSlopePCNT","TotDASqKM")]
+
+```
+
+
+```{r load and merge w/ barrier/impoundment info}
+
+load(file.path(zonal_stats_dir,"NENY_CovariateData_Impoundments_2014-01-23.RData"))
+basin.stats<-UpstreamStatsImpounded
+# rm(UpstreamStatsImpounded)
+# head(basin.stats)
+
+# based on intersection between FWS wetlands survey (CONUS) and med rez flowlines 
+# open=open water, 
+# all=wetlands and open water  (so subtract open from all to get just wetlands...)
+     # "ImpoundmentsOpenSqKM"    "ImpoundmentsAllSqKM"      areas intersecting w/ stream network 
+     # "OffChannelOpenSqKM"      "OffChannelAllSqKM"        areas not intersecting w/ stream network
+     # "WetlandsOpenSqKM"        "WetlandsAllSqKM"          areas in drainage area, whether or not on network (should be same as CONUS, but in area instead of %?)
+     # "PercentImpoundedOpen"    "PercentImpoundedAll"      percentage of wetlands or open water that is on the stream network (should be able to derive from above)
+
+#rename impounded area stats
+basin.stats$OnChannelWaterSqKM<-basin.stats$ImpoundmentsOpenSqKM
+basin.stats$OnChannelWetlandSqKM<-basin.stats$ImpoundmentsAllSqKM-basin.stats$ImpoundmentsOpenSqKM
+basin.stats$OffChannelWaterSqKM<-basin.stats$OffChannelOpenSqKM
+basin.stats$OffChannelWetlandSqKM<-basin.stats$OffChannelAllSqKM-basin.stats$OffChannelOpenSqKM
+basin.stats<-basin.stats[,-which(names(basin.stats) %in% c("ImpoundmentsOpenSqKM","ImpoundmentsAllSqKM","WetlandsOpenSqKM","WetlandsAllSqKM",
+                                                           "PercentImpoundedOpen","PercentImpoundedAll","OffChannelOpenSqKM","OffChannelAllSqKM"))]
+
+#classify large and small barriers
+# 1 = Complete barrier to all fish (12+ feet)
+# 2 = Small dam barrier (1-12 feet)
+# 3 = Partial breach
+# 4 = Barrier with fish ladder
+# 5 = Unlikely barrier - fully breached, weir, under 1ft dam (also COND=NO DAM or COND=REM or COND=DEL)
+# 6 = Unknown, assumed full barriers
+# 7 = Locks
+basin.stats$large_barriers<-basin.stats$deg_barr_1+basin.stats$deg_barr_4+
+     basin.stats$deg_barr_6+basin.stats$deg_barr_7
+basin.stats$small_barriers<-basin.stats$deg_barr_2+basin.stats$deg_barr_3
+
+# head(basin.stats)
+
+```
+
+
+```{r merge general and impounded basin stats}
+
+basin.stats<-merge(basin.stats1, basin.stats,
+                 by="FEATUREID",sort=F,all.x=T,all.y=T)
+rm(UpstreamStats,UpstreamStatsImpounded,LocalStats,basin.stats1)
+head(basin.stats)
+
+
+```
+
+
+```{r merge basin stats into spatial points data}
+
+# bkup<-gages.plotted.spatial
+
+gages.char.spatial<-merge(gages.spatial,basin.stats,by="FEATUREID",all.x=T,all.y=F,sort=F)
+
+
+
+```
+
+
+
+
+```{r save gages plotted spatial and data}
+setwd(flow_data_dir)
+save(gages.spatial,file="gages_spatial.Rdata")
+save(gages.char.spatial,file="gages_char_spatial.Rdata")
+write.csv(gages.char.spatial@data,"gages_char.csv",row.names=F)
+# rm(catchments)
+
+```
+
+

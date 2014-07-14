@@ -1,0 +1,108 @@
+
+
+```{r basic model w da and precip only, results='hold'}
+# use to compare residuals against basin characteristics
+# since da is such a big driver, "removing" it helps to discern other relationships
+
+mod.basic<-lm(log(annual.mean) ~ log(da_to_use) +               
+                   log.nonzero(precip_total) + 
+                   1,
+         data=q.w.precip,
+         na.action=NULL)
+mod.basic2<-lm(log(annual.mean) ~ log(da_to_use) +
+                    1,
+         data=q.w.precip,
+         na.action=NULL)
+summary(mod.basic)
+summary(mod.basic2)
+```
+
+### pairs of ind variables and basic model resid
+```{r corr w ind variables, fig.width=18, fig.height=12}
+
+#  "Forest"              "Herbacious"             "Agriculture"             "HerbaciousOrAgriculture" "Developed"            "DevelopedNotOpen"       
+#  "UndevelopedForest"       "Impervious"    
+
+# "DrainageClass"           "HydrologicGroupA"    "HydrologicGroupAB"      
+# "HydrologicGroupCD"       "HydrologicGroupD4"   "HydrologicGroupD1"       "SurficialCoarseA"        "SurficialCoarseB"       
+# "SurficialCoarseC"        "SurficialCoarseD"    "PercentSandy"    
+
+#  "BasinElevationM"     "BasinElevationFT"       "ReachElevationM"         "ReachElevationFT"
+#  "BasinSlopeDEG"       "ReachSlopeDEG"          "ReachSlopePCNT"          "BasinSlopePCNT"
+
+# "Water"                   "Wetland"             
+# "OnChannelWaterSqKM"      "OnChannelWetlandSqKM" "OffChannelWaterSqKM"     "OffChannelWetlandSqKM"   
+
+
+#land use
+pairs(cbind(mod.basic$residuals,exp(mod.basic$residuals),
+            q.w.precip[c("Forest","Herbacious","Agriculture","HerbaciousOrAgriculture",
+                         "Developed","DevelopedNotOpen","UndevelopedForest","Impervious")]),
+      lower.panel=panel.pearson,diag.panel = panel.hist,upper.panel = panel.smooth,main="land use") 
+
+#soils/geol
+pairs(cbind(mod.basic$residuals,exp(mod.basic$residuals),
+            q.w.precip[c("DrainageClass","HydrologicGroupAB","HydrologicGroupCD","HydrologicGroupD1",
+                         "SurficialCoarseA","SurficialCoarseB","SurficialCoarseC","SurficialCoarseD","PercentSandy")]),
+      lower.panel=panel.pearson,diag.panel = panel.hist,upper.panel = panel.smooth,main="soils & geo") 
+#soils/geo refined
+pairs(cbind(mod.basic$residuals,exp(mod.basic$residuals),
+                 q.log[c("DrainageClass","HydrologicGroupCD",
+                         "SurficialCoarseC","PercentSandy")]),
+      lower.panel=panel.pearson,diag.panel = panel.hist,upper.panel = panel.smooth,main="soils & geo") 
+
+#wetlands and dams
+pairs(cbind(mod.basic$residuals,exp(mod.basic$residuals),
+            q.w.precip[c("Water","Wetland","OnChannelWaterSqKM","OnChannelWetlandSqKM",
+                         "OffChannelWaterSqKM","OffChannelWetlandSqKM",
+                         "TNC_DamCount")]),  #"small_barriers"
+      lower.panel=panel.pearson,diag.panel = panel.hist,upper.panel = panel.smooth,,main="wetlands & dams") 
+
+#topo
+pairs(cbind(mod.basic$residuals,exp(mod.basic$residuals),
+            q.w.precip[,c("BasinElevationM","ReachElevationM",
+                         "ReachSlopePCNT","BasinSlopePCNT")]),
+      lower.panel=panel.pearson,diag.panel = panel.hist,upper.panel = panel.smooth,main="topo") 
+
+
+
+pairs(cbind(mod.basic$residuals,exp(mod.basic$residuals),
+            q.log[,c("AnnualPrcpMM","precip_total",
+#                      "BasinElevationM","BasinSlopePCNT",
+                                "DrainageClass",#"HydrologicGroupCD", #"PercentSandy",
+                                "HerbaciousOrAgriculture","Forest",#"Developed",
+#                                 "Water","Wetland","OnChannelWaterSqKM","OnChannelWetlandSqKM","OffChannelWaterSqKM","OffChannelWetlandSqKM" 
+                                "Water" #,"OnChannelWaterSqKM" 
+                         )]),
+      lower.panel=panel.pearson,diag.panel = panel.hist,upper.panel = panel.smooth,main="selected basin char") 
+
+pairs(cbind(mod.basic$residuals,exp(mod.basic$residuals),
+            apply(q.w.precip[,c("BasinElevationM",
+                                "AnnualPrcpMM","precip_total",
+                                "PercentSandy",
+                                "Developed","HerbaciousOrAgriculture","Forest",
+                                "Wetland","OnChannelWaterSqKM")], MARGIN=c(1,2),FUN=function(x) {if (x>0) log(x) else 0})
+            ),
+      lower.panel=panel.pearson,diag.panel = panel.hist,upper.panel = panel.smooth,main="selected basin char log scale") 
+
+```
+
+### distribution of independent variables
+```{r distribution of independent variables}
+# plot(0)
+#look at distribution of independent variables 
+for (i in c("PercentSandy","Developed","HerbaciousOrAgriculture",
+            "Wetland","BasinElevationM","AnnualPrcpMM")) {
+     par(mfrow=c(2,3))
+     boxplot(q.w.precip[,i],main=i)
+     boxplot(log.nonzero(q.w.precip[,i]),main=paste("log",i))
+     boxplot(log(q.w.precip[,i]+100),main=paste("log v2",i))
+     hist(q.w.precip[,i],main=i)
+     hist(log.nonzero(q.w.precip[,i]),main=paste("log",i))
+     hist(log(q.w.precip[,i]+100),main=paste("log v2",i))
+     box("outer", col="blue")
+}
+par(mfrow=c(1,1))
+
+```
+

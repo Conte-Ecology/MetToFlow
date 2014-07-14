@@ -1,0 +1,230 @@
+
+```{r}
+library(maptools)
+library(reshape2)
+library(plyr)
+library(lubridate) #date/time functions
+library(EcoHydRology) #snow melt model
+library(DataCombine) #for lag and lead terms
+
+data_dir<-"C:/ALR/Data"
+flow_data_dir<-"C:/ALR/Model_processed_data/flow_daily"
+
+proj4.GCS<-"+proj=longlat +ellps=GRS80 +datum=NAD83 +no_defs +towgs84=0,0,0 "
+```
+
+```{r results}
+
+# #plotting met grid cells, etc 
+setwd(flow_data_dir)
+# load(file="gages_met_spatial.Rdata")
+# gages.met<-read.csv("gages_met.csv",stringsAsFactors=F,colClasses=c("site_no"="character"))
+
+# # #load met data
+# setwd(flow_data_dir)
+# # load("climate_matrices.Rdata")          
+# load("cdaily.Rdata")          
+# load("cmonthly.Rdata" )          
+# load("cseasonal.Rdata")
+# load("cannual.Rdata")          
+
+```
+
+
+```{r load mauer polygons linked gages w/ met data}
+
+
+met.poly<-readShapePoly(file.path(data_dir,"ClimateData/Mauer/met_poly_GCS"),proj4string=CRS(proj4.GCS))
+
+gages.met.spatial<-gages.char.spatial
+gages.met.spatial@data<-gages.met.spatial@data[,c( "site_no","station_nm" ,"dec_lat_va","dec_long_va","FEATUREID")]  
+gages.met.spatial$met_filename<-over(gages.met.spatial,met.poly)[,"file_nm"]
+gages.met<-as.data.frame(gages.met.spatial@data)
+gages.met$met_filename<-as.character(gages.met$met_filename)
+
+setwd(flow_data_dir)
+save(gages.met.spatial,file="gages_met_spatial.Rdata")
+write.csv(gages.met,"gages_met.csv",row.names=F)
+head(gages.met)
+
+head(met.poly@data)
+
+# plot(gages.met,col="red")
+# plot(met.poly,border="blue",add=T)
+# rm(met.poly)
+```
+
+
+```{r set up to load mauer met data}
+
+#using daily data from mauer obs met data set 
+#http://www.engr.scu.edu/~emaurer/gridded_obs/index_gridded_obs.html
+# Gridded Meteorological Data: 1949-2010
+# Data Set: Daily 1/8-degree gridded meteorological data [1 Jan 1949 - 31 Dec 2010]. Data are posted as they are created.
+# Maurer, E.P., A.W. Wood, J.C. Adam, D.P. Lettenmaier, and B. Nijssen, 2002, A Long-Term Hydrologically-Based Data Set of Land Surface Fluxes and States for the Conterminous United States, J. Climate 15, 3237-3251.
+# 
+# The links below are to files containing daily precipitation (mm/day), maximum and minimum temperature (C), and 10-m wind speed (m/s) for each 1/8-degree grid cell, grouped (using the UNIX tar command) by hydrologic area. The individual data files, (which can be extracted using tar zxvf <tar filename>) indicate the location center of the grid cell in the file name: data_<latitude>_<longitude>. Each daily data file contains columns of year, month, day, daily total precipitation, maximum temperature, minimum temperature, and average 10-meter wind speed in ascii format. 
+
+#columns from mauer
+mauer.cols<-c("year", "month", "day","precip.mm", "tmax","tmin","wind")
+#precip_mm  tmax  tmin
+met.cols<-c("precip.mm","rain","melt","precip.e.lag1","precip.e.lag2","precip.e.lag3","tmin","tmax")
+          # store tavg?  effective precip?
+
+setwd(file.path(data_dir,"ClimateData/Mauer/daily/east"))
+#get dimensions for 3-d array, date, and calculate month/season/annual date columns
+met.template<-read.table(file="data_44.1875_-70.3125",col.names=mauer.cols)
+
+met.template$date1<-apply(met.template[,1:3],MARGIN=1,FUN=function(d) (paste(d,collapse="-")))
+met.template$date1<-as.Date(met.template$date1)
+
+met.template$date<-as.character(met.template$date)
+met.template$month.date<-as.character( to.month(met.template$date) )
+met.template$season.date<-as.character( to.season(met.template$date) )
+met.template$annual.date<-as.character( to.water.year(met.template$date) )
+
+
+#check that dates in template match dates in Mauer met data files
+#   we're checking one met data file and then trusting the rest match... 
+dim(met.template)
+dim(date.template[[1]])
+sum(met.template$date!=date.template[[1]][,1])          
+sum(met.template$date==date.template[[1]][,1])          
+
+
+head(met.template)
+tail(met.template)
+````
+
+
+```{r set up met array}
+#create all four matrices
+cmatrix.names<-c("cdaily","cmonthly","cseasonal","cannual")
+met.filename.sorted<-sort(unique(gages.met$met_filename))
+head(met.filename.sorted)
+
+# save(cmatrix.names,met.filename.sorted,mauer.cols,met.cols,"sfafds")
+
+cmatrices<-list(length=4)
+
+for (k in 1:length(cmatrix.names)) {
+     print(cmatrix.names[k])
+     cmatrices[k][[1]]<-array(dim=c(   nrow(date.template[names(date.template)[k]][[1]]), 
+                                       length(met.filename.sorted), 
+                                       length(met.cols))  ) 
+     dimnames(   cmatrices[k][[1]]   )[[1]]<-date.template[names(date.template)[k]][[1]][,1]
+     dimnames(   cmatrices[k][[1]]    )[[2]]<-met.filename.sorted
+     dimnames(   cmatrices[k][[1]]   )[[3]]<-met.cols
+     names(cmatrices)[k]<-cmatrix.names[k]
+}
+
+
+
+```
+
+```{r loop through and get met data for each polygon}
+
+if(!exists("met.poly")) 
+     met.poly<-readShapePoly(file.path(data_dir,"ClimateData/Mauer/met_poly_GCS"),proj4string=CRS(proj4.GCS))
+
+setwd(file.path(data_dir,"ClimateData/Mauer/daily/east"))
+
+# agg.function2<-function(df,return.wind=F) {
+#      x<-c(precip_mm=mean(df$precip_mm),
+#           tavg=mean(df$tmax+df$tmin),
+#           complete=sum(!is.na(df$precip_mm))>=cutoff)
+#      if(return.wind)
+#           x<-c(x,wind=mean(df$wind))
+#      return(x) }
+
+
+agg.function2<-function(df) return( c(precip.mm=sum(df$precip.mm),
+                                        tmin=mean(df$tmin),
+                                        tmax=mean(df$tmax),
+#                                         tavg=mean((df$tmax+df$tmin)/2),
+                                        rain=sum(df$rain),
+                                        melt=sum(df$melt),
+                                        complete=sum(!is.na(df$precip.mm))>=cutoff))
+
+print(paste("### begin reading",length(met.filename.sorted),"met files"))
+for (i in 1:length(met.filename.sorted) ) {
+# for (i in 1:5 ) {
+     print(i)
+     if(file.exists(met.filename.sorted[i])) {
+          x<-read.table(file=met.filename.sorted[i],col.names=mauer.cols)
+          x[,c( "date1","date","month.date","season.date","annual.date")]<- met.template[,c( "date1","date","month.date","season.date","annual.date")]
+          centroid<-met.poly@data[met.poly$file_nm==met.filename.sorted[i],]
+          suppressWarnings(
+               x.snow<-SnowMelt(Date=x$date1,precip_mm=x$precip.mm,Tmax_C=x$tmax,Tmin_C=x$tmin,lat_deg=centroid$y,windSp=x$wind,windHt=10))
+          x[,c("rain","melt")]<-x.snow[,c("Rain_mm","SnowMelt_mm")]
+          for (j in 1:length(cmatrices) ){     
+               cutoff<-complete.cutoff[j]     
+               x.agg<-ddply(x, names(date.template)[j], agg.function2)
+#                sum(x.agg[,1]!=sort(x.agg[,1]))
+               x.agg[x.agg$complete==0,-which(names(x.agg) %in% c("month.date","complete"))]<-NA
+               x.agg$precip.e<-x.agg$rain+x.agg$melt
+               x.agg<-slide(x.agg,Var="precip.e",NewVar="precip.e.lag1",slideBy=-1,reminder=F)
+               x.agg<-slide(x.agg,Var="precip.e",NewVar="precip.e.lag2",slideBy=-2,reminder=F)
+               x.agg<-slide(x.agg,Var="precip.e",NewVar="precip.e.lag3",slideBy=-3,reminder=F)
+               x.final<-as.matrix(x.agg[,met.cols])
+               cmatrices[[j]][,i,]<-x.final
+          }
+#           head(x.agg)
+#           head(cmatrices[[j]][,i,])
+#           tail(x.agg)
+#           tail(cmatrices[[j]][,i,])
+          
+     }
+     else
+          print(paste("MISSING FILE: can't find",i))
+}
+
+
+
+```
+
+
+```{r save matrices}
+setwd(flow_data_dir)
+
+save(cmatrices,file="climate_matrices.Rdata")
+
+
+
+#forgive me.... copy/paste
+cdaily<-cmatrices["cdaily"][[1]]
+str(cdaily)
+save(cdaily,file=paste0("cdaily.Rdata"))
+cmonthly<-cmatrices["cmonthly"][[1]]
+save(cmonthly,file=paste0("cmonthly.Rdata"))
+cseasonal<-cmatrices["cseasonal"][[1]]
+save(cseasonal,file=paste0("cseasonal.Rdata"))
+cannual<-cmatrices["cannual"][[1]]
+save(cannual,file=paste0("cannual.Rdata"))
+
+rm(met.poly)
+rm(x,x.snow,x.agg,met.template,centroid)
+# rm(cmatrices,cdaily)
+
+# gc()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

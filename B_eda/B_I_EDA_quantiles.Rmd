@@ -1,0 +1,174 @@
+# Seasonal flow timeseries model<br> from paired flow and meterological/weather record
+## 
+## Exploratory Data Analysis: comparison of precipitation vs flow quantiles
+## ALR July 2014<br>Conte Anadromous Fish Research Center
+##   
+
+### Load libraries, functions, etc
+
+```{r}
+library(lme4)
+library(plyr)
+library(ggplot2)
+library(reshape2)
+library(sp)
+library(devtools)
+
+
+model_dir<-"C:/ALR/Models/MetToFlow"
+model_data_dir<-"C:/ALR/Models_processed_data"
+
+
+#utility functions, load (source) from my saved gist
+source_gist("https://gist.github.com/anarosner/ba285306fc0ce9d812a5", sha1="b25a1b73e02cc2b2d2c590f6c0b2c9c9945fa980")
+
+```
+
+
+```{r select gages w/ long records}
+setwd(file.path(model_data_dir,"flow_timeseries"))
+
+load("gages_char_spatial.Rdata")
+long_site_no<-gages.char.spatial$site_no[gages.char.spatial$qannual>=30 & gages.char.spatial$TNC_DamCount==0]
+length(long_site_no)
+View(t(gages.char.spatial@data[gages.char.spatial$site_no %in% long_site_no,]))
+
+load("dseasonal.Rdata")
+dseasonal.long<-dseasonal[dseasonal$site_no %in% long_site_no,]
+dseasonal.long<-subset(dseasonal.long,subset=!is.na(precip.e) & !is.na(precip.e.lag1) & !is.na(precip.e.lag2) )
+# dseasonal.long[is.na(dseasonal.long$precip.e.lag2),]
+# dim(dseasonal.long)
+
+
+
+# 1 = Complete barrier to all fish (12+ feet)
+# 2 = Small dam barrier (1-12 feet)
+# 3 = Partial breach
+# 4 = Barrier with fish ladder
+# 5 = Unlikely barrier - fully breached, weir, under 1ft dam (also COND=NO DAM or COND=REM or COND=DEL)
+# 6 = Unknown, assumed full barriers
+# 7 = Locks
+```
+
+```{r}
+basic<-lmer(log(flow) ~ 
+              log(da_sqkm) +
+               precip.e +  precip.e.lag1 + precip.e.lag2 +    #precip.e.lag3 + 
+               (1|year)+(1|site_no),
+          na.action=NULL, #to ensure we attached fitted values w/ correct site_no
+         data=dseasonal.long) 
+
+season.names<-c("winter","spring","summer","fall")
+# basic.season<-list()
+weights<-as.data.frame(matrix(nrow=4,ncol=3))
+
+for (i in 1:length(season.names)) {
+     temp<-update(basic, subset=season==season.names[i])
+     weights[i,]<-fixef(temp)[c("precip.e", "precip.e.lag1", "precip.e.lag2")]/
+          sum(fixef(temp)[c("precip.e", "precip.e.lag1", "precip.e.lag2")])
+#      basic.season[season.names[i]]<-temp
+}
+row.names(weights)<-season.names
+names(weights)<-c("precip.e", "precip.e.lag1", "precip.e.lag2")
+
+weights
+
+```
+
+### compare precip vs flow quantiles from sites w long records
+```{r compare quantiles of sites w long records, fig.width=15, fig.height=10, warning=FALSE}
+
+# 4 sites, 4 seasons
+
+rm(quant.melt)
+for (i in long_site_no) {
+#      i<-long_site_no[2]
+     print(i)
+     for (j in 1:length(season.names)) {
+          print(j)
+          print(season.names[j])
+          temp<-dseasonal.long[dseasonal.long$site_no == i &
+                                    dseasonal.long$season==season.names[j],
+                            c("precip.e","precip.e.lag1","precip.e.lag2","flow","year")]
+          temp.weighted<-temp[,1]*weights[j,1] + temp[,2]*weights[j,2] + temp[,3]*weights[j,3]
+          
+          cdf.q<-ecdf(temp$flow)
+          cdf.p<-ecdf(temp$precip.e)
+          cdf.p.weighted<-ecdf(temp.weighted)
+          
+          temp.q<-data.frame(year=temp$year,
+                             flow=cdf.q(temp$flow),
+                             precip=cdf.p(temp$precip.e),
+                             precip.weighted=cdf.p.weighted(temp.weighted),
+                             site=i,
+                             season=season.names[j],
+                             stringsAsFactors=F)
+
+          temp.q$high<-apply(temp.q[,c("flow","precip")],MARGIN=1,max)
+          temp.q$low<-apply(temp.q[,c("flow","precip")],MARGIN=1,min)
+          temp.q$high.weighted<-apply(temp.q[,c("flow","precip.weighted")],MARGIN=1,max)
+          temp.q$low.weighted<-apply(temp.q[,c("flow","precip.weighted")],MARGIN=1,min)
+#           temp.q$under<-(temp.q$flow-temp.q$precip)>0
+          head(temp.q)
+     
+          temp.melt<-melt(temp.q,id.vars=c("year","site", "season","high","low","high.weighted","low.weighted"))
+          {     
+          if(!exists("quant.melt"))
+               quant.melt<-temp.melt
+          else{
+#                print((nrow(quant.melt)+1))
+#                print((nrow(quant.melt)+nrow(temp.melt)))
+               quant.melt[(nrow(quant.melt)+1):
+                               (nrow(quant.melt)+nrow(temp.melt)),]<-temp.melt
+          }
+          }
+     }
+}
+head(quant.melt)
+
+quant.melt$variable<-(capitalize(as.character(quant.melt$variable)))
+quant.melt$season<-capitalize(quant.melt$season)
+# names(quant.melt)[names(quant.melt)=="value"]<-"quantile"
+
+# quant.melt$year.factor<-as.factor(quant.melt$year)
+unique(quant.melt$variable)
+```
+
+    
+```{r}
+
+
+
+gg.quant<-ggplot(data=subset(quant.melt,variable %in% c("Flow","Precip" )),
+                 aes(x=year,y=value,color=variable,lty=variable)) +
+     theme_bw()+scale_colour_hue(l=40)+ylab("quantile")+theme(legend.title=element_blank())
+limits <- aes(ymax = high, ymin=low)
+
+#      i<-capitalize(season.names[1])
+for (i in capitalize(season.names)) {  
+     temp<-gg.quant +  
+          geom_line(subset=.(season==i),colour="grey50") + 
+          geom_errorbar(limits,colour="grey30",lwd=1.1,subset=.(season==i)) +
+          geom_point(pch=15,cex=3,subset=.(season==i)) +
+          facet_wrap(~site,nrow=2) + ggtitle(i)
+     print(temp)
+     
+     print(
+          temp %+% subset(quant.melt,variable %in% c("Flow","Precip.weighted")) +
+              ggtitle(paste("Weighted quantiles:",i))
+           )
+     
+#      setwd(file.path(model_dir,"B_eda"))
+#      ggsave(temp,filename=paste0("quantile_",i,".png"),width=16,height=8)
+#      ggsave(temp,filename=paste0("quantile_weighted_",i,".png"),width=16,height=8)
+}
+     
+
+
+
+
+```
+
+
+
+

@@ -1,0 +1,118 @@
+```{r}
+library(knitr)
+
+model_data_dir<-"C:/ALR/Model_processed_data"
+
+setwd("C:/ALR/Models/CTRflows3/get_flow_data/daily_seasonal")  #hard coded directory name...change me
+purl(input="0_general_functions.Rmd",output="0_general_functions.R",documentation=0)
+source("0_general_functions.R")
+file.remove("0_general_functions.R")
+```
+
+```{r}
+#create df to merge flow/q and met/climate (into data/d)
+dannual1<-array(dim=c(dim(qannual)[1],nrow(gages.met.spatial),6))
+dimnames(dannual1)[[1]]<-dimnames(qannual)[[1]]
+dimnames(dannual1)[[2]]<-gages.met.spatial$site_no
+dimnames(dannual1)[[3]]<-c("rain","melt","precip.e.lag1","precip.e.lag2","precip.e.lag3","flow")
+#copy flows
+dannual1[,,"flow"]<-qannual[,gages.met.spatial$site_no,1]
+
+#loop through gages to pull appropriate climate/met data
+for (i in 1:dim(dannual1)[[2]]) {
+     j<-gages.met[gages.met$site_no== dimnames(dannual1)[[2]][i],"met_filename"]
+     print(j)
+     if (length(j)>0) {
+          dannual1[,i,1:5]<-cannual[,j,2:6]
+     }
+}
+#tail(dannual1[,10,],30) #view data for single(random) site
+
+dannual2<-melt.3d(dannual1) #this is where site_no is being changed from char to numeric!
+dannual2<-subset(dannual2,!is.na(flow))
+dannual<-merge(dannual2,gages.char.spatial@data,by="site_no",all.x=T,all.y=F,sort=F)
+dannual$year<-year(as.Date(as.character(dannual$date)))
+# head(dannual)
+# str(dannual)
+
+save(dannual,file=file.path(model_data_dir,"dannual.Rdata"))
+```
+
+```{r seasonal}
+dseasonal1<-array(dim=c(dim(qseasonal)[1],nrow(gages.met.spatial),6))
+dimnames(dseasonal1)[[1]]<-dimnames(qseasonal)[[1]]
+dimnames(dseasonal1)[[2]]<-gages.met.spatial$site_no
+dimnames(dseasonal1)[[3]]<-c("rain","melt","precip.e.lag1","precip.e.lag2","precip.e.lag3","flow")
+dseasonal1[,,"flow"]<-qseasonal[,gages.met.spatial$site_no,1]
+for (i in 1:dim(dseasonal1)[[2]]) {
+     j<-gages.met[gages.met$site_no== dimnames(dseasonal1)[[2]][i],"met_filename"]
+     print(j)
+     if (length(j)>0) {
+          dseasonal1[,i,1:5]<-cseasonal[,j,2:6]
+     }
+}
+dseasonal2<-melt.3d(dseasonal1)
+dseasonal2<-subset(dseasonal2,!is.na(flow))
+dseasonal<-merge(dseasonal2,gages.char.spatial@data)
+dseasonal$season<-to.season(d=dseasonal$date,"season")
+dseasonal$year<-year(as.Date(as.character(dseasonal$date)))
+dseasonal$precip.e<-dseasonal$rain+dseasonal$melt
+
+
+head(dseasonal)
+rm(dseasonal1,dseasonal2)
+str(dseasonal)
+save(dseasonal,file=file.path(model_data_dir,"dseasonal.Rdata"))
+```
+
+```{r}
+# dmonthly<-array(dim=c(dim(qmonthly)[1],nrow(gages.met.spatial),6))
+# dimnames(dmonthly)[[1]]<-dimnames(qmonthly)[[1]]
+# dimnames(dmonthly)[[2]]<-gages.met.spatial$site_no
+# dimnames(dmonthly)[[3]]<-c("rain","melt","precip.e.lag1","precip.e.lag2","precip.e.lag3","flow")
+# dmonthly[,,"flow"]<-qmonthly[,gages.met.spatial$site_no,1]
+# for (i in 1:dim(dmonthly)[[2]]) {
+#      j<-gages.met[gages.met$site_no== dimnames(dmonthly)[[2]][i],"met_filename"]
+#      print(j)
+#      if (length(j)>0) {
+#           dmonthly[,i,1:5]<-cmonthly[,j,2:6]
+#      }
+# }
+# dmonthly.melt<-melt.3d(dmonthly)
+# dmonthly.melt<-subset(dmonthly.melt,!is.na(flow))
+# dmonthly.merge<-merge(dmonthly.melt,gages.char.spatial@data)
+# head(dmonthly.merge)
+# 
+# # save(dseasonal,file=file.path(model_data_dir,"dseasonal.Rdata"))
+
+```
+
+
+```{r}
+# boo<-dannual1
+# dimnames(dannual1)[[2]]<-as.factor(dimnames(dannual1)[[2]])
+# boo3<-(as.factor(dimnames(dannual1)[[2]]))
+# str(boo3)
+# dimnames(boo)[[2]]<-boo3
+# str(boo)
+# boo2<-melt(boo[,,1])
+# head(boo2)
+# 
+# boo<-dannual1
+# x<-data.frame(id=1:dim(boo)[[2]],site_no=dimnames(boo)[[2]],stringsAsFactors=F)
+# str(x)
+# dimnames(boo)[[2]]<-x$id
+# out<-melt(boo[,,1])
+# names(out)<-c("date","id",dimnames(boo)[[3]][1])
+# out<-merge(out,x,by="id",sort=F)
+# out<-out[,c("date","site_no",dimnames(boo)[[3]][1])]
+# tail(out)
+# str(out)
+# 
+# dimnames(a)[[3]][1]
+#      for (i in 2:dim(a)[3]) {
+#           m<-melt(a[,,i])
+#           out[,dimnames(a)[[3]][i]]<-m[,3]
+#      }
+
+```
