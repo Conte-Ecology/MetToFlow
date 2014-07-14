@@ -12,27 +12,32 @@ library(knitr)
 library(ggplot2)
 library(plyr)
 
+opts_chunk$set(comment=NA)
+```
+
+
+
+```r
+#utility functions, load (source) from my saved gist
 source_gist("https://gist.github.com/anarosner/ba285306fc0ce9d812a5", sha1="b25a1b73e02cc2b2d2c590f6c0b2c9c9945fa980")
 
-model_data_dir<-"C:/ALR/Model_processed_data"
-model_dir<-"C:/ALR/Models/CTRflows3/07-2014 met to flow"
+model_dir<-"C:/ALR/Models/MetToFlow"
+model_data_dir<-"C:/ALR/Models_processed_data"
 
-setwd(model_dir)
-setwd("../get_flow_data/daily_seasonal")  #hard coded directory name...change me
+#load (source) this project's general functions
+setwd(file.path(model_dir,"A_get_data"))  
 purl(input="0_general_functions.Rmd",output="0_general_functions.R",documentation=0)
 source("0_general_functions.R")
 file.remove("0_general_functions.R")
 
-setwd(file.path(model_dir,"calib_data"))
-
-opts_chunk$set(comment=NA)
+season.names<-c("winter","spring","summer","fall")
 ```
 
 
 ### Load seasonal data, and look at number of records, sites, and years
 
 ```r
-load(file=file.path(model_data_dir,"dseasonal.Rdata"))
+load(file=file.path(model_data_dir,"flow_timeseries","dseasonal.Rdata"))
 
 
 dseasonal<-subset(dseasonal,!is.na(HydrologicGroupAB) & !is.na(flow) & !is.na(rain) & !is.na(precip.e.lag2))
@@ -84,18 +89,22 @@ length(unique(dseasonal$site_no[dseasonal$OnChannelWaterSqKM<.5 & dseasonal$TNC_
 #120 with no LARGE barriers
 #97 with no  barriers 
 
-# 
-# length(unique(dseasonal$year))
-# min(dseasonal$year[!is.na(dseasonal$rain)] )
-# max(dseasonal$year[!is.na(dseasonal$rain)] )
-# # 62 unique years (records that have both flow and met data)
-# #from 1949-2010
-# 
+
+# 7870 total records
 nrow(dseasonal)
 ```
 
 ```
 [1] 7870
+```
+
+```r
+# 4140 records from sites w/ no LARGE barriers
+nrow(dseasonal[dseasonal$large_barriers==0,])
+```
+
+```
+[1] 4140
 ```
 
 ```r
@@ -107,14 +116,7 @@ nrow(dseasonal[dseasonal$OnChannelWaterSqKM<.5,])
 ```
 
 ```r
-nrow(dseasonal[dseasonal$large_barriers==0,])
-```
-
-```
-[1] 4140
-```
-
-```r
+# 3879 records from sites w/ no LARGE barriers and <.5 sq km impoundments
 nrow(dseasonal[dseasonal$OnChannelWaterSqKM<.5 & dseasonal$large_barriers==0,])
 ```
 
@@ -123,6 +125,7 @@ nrow(dseasonal[dseasonal$OnChannelWaterSqKM<.5 & dseasonal$large_barriers==0,])
 ```
 
 ```r
+# 3283 records from sites w/ no barriers
 nrow(dseasonal[dseasonal$TNC_DamCount==0,])
 ```
 
@@ -131,6 +134,7 @@ nrow(dseasonal[dseasonal$TNC_DamCount==0,])
 ```
 
 ```r
+# 3114 records from sites w/ no barriers and <.5 sq km impoundments
 nrow(dseasonal[dseasonal$OnChannelWaterSqKM<.5 & dseasonal$TNC_DamCount==0,])
 ```
 
@@ -139,10 +143,9 @@ nrow(dseasonal[dseasonal$OnChannelWaterSqKM<.5 & dseasonal$TNC_DamCount==0,])
 ```
 
 ```r
-# 7870 total records
-# 4140 records from sites w/ no LARGE barriers
-# 3283 records from sites w/ no barriers
-
+#subset of unregulated gages
+#   defined as NO dams from TNC barrier inventory
+#   AND upstream on-channel open waterbodies < 0.5 sq km
 d.unreg<-subset(dseasonal,TNC_DamCount==0 & dseasonal$OnChannelWaterSqKM<.5)
 ```
 
@@ -152,40 +155,29 @@ d.unreg<-subset(dseasonal,TNC_DamCount==0 & dseasonal$OnChannelWaterSqKM<.5)
 # View(d.unreg[,c(1:9,58,59,21:23)])
 
 #choose validation set
+#select some gages to leave out for validations
+#    AND select some years, leave out records from all gages for those year for validation
+#    so that combined validation set #records is 10-15% of total records
 
-                    #hold out 10 sites (approxinatekt 10% of unique sites) for calibration
+
+#choose 8 sites w/ more than 4 yrs records
 set.seed(933550175)
-val.gages<-sample(unique(d.unreg$site_no[d.unreg$qseasonal>12]),size=8,replace=F)
-# val.gages<-sample(unique(d.unreg$site_no),size=10,replace=F)
-val.gages
-```
+val.gages<-sample(unique(d.unreg$site_no[d.unreg$qseasonal>12]),size=8,replace=F)  
+# val.gages
 
-```
-[1] "04288230" "01109200" "04276920" "01434105" "04292770" "04280300"
-[7] "01096910" "01100568"
-```
-
-```r
-                    #hold out 6 years (approxinatekt 10% of unique years) for calibration
-                    
-                    # plot(as.Date(dimnames(qseasonal)[[1]]),
-                         #apply(qseasonal[,,2],MARGIN=1,FUN=function(x) sum(x>0,na.rm=T)))
-                    #as years before ~1965 had many fewer sites than in other years, 
-                         #choose years after that date
+#choose 5 years
 set.seed(993889335)
 val.year<-sample(unique(d.unreg$year),5,replace=F)
-val.year
+sort(val.year)
 ```
 
 ```
-[1] 1999 1956 2006 1954 1983
+[1] 1954 1956 1983 1999 2006
 ```
 
 ```r
-# unique(d.unreg[d.unreg$site_no %in% val.gages,"year"])
-# View(d.unreg[d.unreg$site_no %in% val.gages,])
-
-nrow(d.unreg) #3283
+#check number of records chosen as part of validation gages and validation years
+nrow(d.unreg) #3114
 ```
 
 ```
@@ -193,15 +185,15 @@ nrow(d.unreg) #3283
 ```
 
 ```r
-nrow(d.unreg[d.unreg$qseasonal>10,])
+nrow(d.unreg[d.unreg$qseasonal>12,]) #2870
 ```
 
 ```
-[1] 2938
+[1] 2870
 ```
 
 ```r
-nrow(subset(d.unreg,site_no %in% val.gages)) #266   196    208
+nrow(subset(d.unreg,site_no %in% val.gages)) #291
 ```
 
 ```
@@ -209,7 +201,7 @@ nrow(subset(d.unreg,site_no %in% val.gages)) #266   196    208
 ```
 
 ```r
-nrow(subset(d.unreg,year(as.Date(date)) %in% val.year)) #208   301
+nrow(subset(d.unreg,year(as.Date(date)) %in% val.year)) #212
 ```
 
 ```
@@ -217,7 +209,7 @@ nrow(subset(d.unreg,year(as.Date(date)) %in% val.year)) #208   301
 ```
 
 ```r
-nrow(subset(d.unreg, site_no %in% val.gages & year(as.Date(date)) %in% val.year )) #22  11   23
+nrow(subset(d.unreg, site_no %in% val.gages & year(as.Date(date)) %in% val.year )) #22
 ```
 
 ```
@@ -225,8 +217,9 @@ nrow(subset(d.unreg, site_no %in% val.gages & year(as.Date(date)) %in% val.year 
 ```
 
 ```r
+#subset and count size of calib and valid data sets
 d.calib<-subset(d.unreg,!(site_no %in% val.gages | year(as.Date(date)) %in% val.year))
-nrow(d.calib) #2831   2890    2796
+nrow(d.calib) #2633
 ```
 
 ```
@@ -235,7 +228,7 @@ nrow(d.calib) #2831   2890    2796
 
 ```r
 d.valid<-subset(d.unreg, site_no %in% val.gages | year(as.Date(date)) %in% val.year)
-nrow(d.valid) #452   393     486
+nrow(d.valid) #481   
 ```
 
 ```
@@ -243,7 +236,7 @@ nrow(d.valid) #452   393     486
 ```
 
 ```r
-nrow(d.valid)/nrow(d.unreg)*100 #13.76     11.97     approx 14% of total records
+nrow(d.valid)/nrow(d.unreg)*100 #15.44637    approx 15% of total records
 ```
 
 ```
@@ -251,9 +244,8 @@ nrow(d.valid)/nrow(d.unreg)*100 #13.76     11.97     approx 14% of total records
 ```
 
 ```r
-# head(d.calib[,1:4])
-# tail(d.calib[,1:4])
-
+#save calibration and validation data
+setwd(file.path(model_dir,"c_seasonal_means/calib_data"))
 save(d.calib,d.valid,file="calib_valid.Rdata")
 ```
 
@@ -280,12 +272,12 @@ m.fixed<-lm(log(flow) ~
          data=d.calib) 
 
 #create model for each season
-season.names<-c("winter","spring","summer","fall")
 m.fixed.season<-list()
 # for (i in season.names) {
 #      temp<-update(m.fixed, subset=season==i)
 #      m.fixed.season[[i]]<-temp
 # }
+# looping didn't work!  model would change when called later on depending on *current* value of i... oh dear
 
 m.fixed.season[["winter"]]<-update(m.fixed, subset=season=="winter")
 m.fixed.season$winter<-update(m.fixed.season$winter,formula=.~.
@@ -482,10 +474,15 @@ F-statistic:  290 on 8 and 631 DF,  p-value: <2e-16
 
 ```r
 # # all DID...have adj-r-sqr around 0.8976 with old calibration set, but that set was too small....
-i<-"winter" #0.8296     0.8321 v 0.8249
-i<-"spring" #0.8823     0.8929 v .8697
-i<-"summer" #0.7246     0.7553 v 0.715
-i<-"fall" #0.7827       0.7985 v 0.7827
+i<-"winter" #0.827     0.8321 v 0.8249
+i<-"spring" #0.8776     0.8929 v .8697
+i<-"summer" #0.7356     0.7553 v 0.715
+i<-"fall" #0.7833       0.7985 v 0.7827
+
+
+### next addition: add avg temp, and total number of days <0C
+#   might help account for runoff when ground is frozen in winter,
+#   and account for ET in summer and fall (when r-sqr values are lower) 
 ```
 
 
@@ -495,7 +492,7 @@ i<-"fall" #0.7827       0.7985 v 0.7827
 ```r
 m.mixed<-lmer(log(flow) ~ 
                log(drain_area_va) +
-#                log(non.zero(DrainageClass)) + 
+               log(non.zero(DrainageClass)) + 
                log(non.zero(PercentSandy))+
 #                     log(non.zero(HydrologicGroupAB))+ log(non.zero(SurficialCoarseC)) + 
                log(non.zero(Forest)) + 
@@ -513,56 +510,51 @@ m.mixed<-lmer(log(flow) ~
           data=d.calib)
 
 m.mixed.season<-list()
-for (i in 1:length(season.names)) {
-     temp<-update(m.mixed, subset=season==season.names[i])
-     m.mixed.season[[season.names[i]]]<-temp
-     print(paste("#####",season.names[i],"#####"))
-#      print(summary(temp))
-     print(AIC(temp))
-}
-```
 
-```
-[1] "##### winter #####"
-[1] 570.3
-[1] "##### spring #####"
-[1] -57.07
-[1] "##### summer #####"
-[1] 905.6
-[1] "##### fall #####"
-[1] 957.1
-```
+m.mixed.season[["winter"]]<-update(m.mixed, subset=season=="winter")
+m.mixed.season$winter<-update(m.mixed.season$winter,formula=.~.
+                              -log(non.zero(DrainageClass))
+                              -log(non.zero(PercentSandy)) )
 
-```r
+
+m.mixed.season[["spring"]]<-update(m.mixed, subset=season=="spring")
+m.mixed.season$spring<-update(m.mixed.season$spring,formula=.~.
+                              -log(non.zero(DrainageClass))
+                              -log(non.zero(ReachSlopePCNT))
+                              )
+                              
+
+m.mixed.season[["summer"]]<-update(m.mixed, subset=season=="summer")
+m.mixed.season$summer<-update(m.mixed.season$summer,formula=.~.
+                              - log(non.zero(PercentSandy)) 
+                              -log(non.zero(OffChannelWaterSqKM)) 
+                              +log(non.zero(Impervious))
+                              -log(non.zero(Forest))
+                              )
+
+
+m.mixed.season[["fall"]]<-update(m.mixed, subset=season=="fall")
+m.mixed.season$fall<-update(m.mixed.season$fall,formula=.~.
+                            -log(non.zero(DrainageClass))
+                            -log(non.zero(ReachSlopePCNT))   
+                            )
+
+
 rm(m.mixed)
-
-
-
-#      
-#                log(non.zero(DrainageClass)) + 
-#                     #log(non.zero(PercentSandy))+
-#                     #log(non.zero(HydrologicGroupAB))+ log(non.zero(SurficialCoarseC)) + 
-#                log(non.zero(Forest)) + 
-#                log(non.zero(Agriculture)) +     
-#                     #log(non.zero(Impervious))+
-#                log(non.zero(OffChannelWaterSqKM)) + 
-#                     #log(non.zero(OffChannelWetlandSqKM))+
-#                     #log(non.zero(OffChannelWaterSqKM+OffChannelWetlandSqKM)) + 
-#                log(non.zero(BasinSlopePCNT))+ 
-#                     #log(non.zero(ReachSlopePCNT)) +
-#                precip.e +  precip.e.lag1 + 
-#                precip.e.lag2 +
 ```
 
 ### Calculate goodness of fit for calibration data set
 
 ```r
+#create pred df
 pred.calib<-d.calib
 pred.calib$obs<-log(pred.calib$flow)
 pred.calib$pred.fixed<-NA
 pred.calib$pred.mixed<-NA
 
 rm(goodness.fixed.calib,goodness.mixed.calib)
+
+#predict and calc goodness of fit metrics of fixed and mixed models, calibration set
 for (i in season.names) {
      pred.calib[pred.calib$season==i,"pred.fixed"]<-
           predict(m.fixed.season[[i]],
@@ -571,8 +563,6 @@ for (i in season.names) {
           predict(m.mixed.season[[i]],
                   newdata=pred.calib[pred.calib$season==i,],
                   allow.new.levels=T)
-#      boo<-pred.calib[pred.calib$season==i,c("obs","pred.fixed")]
-#      goodness(boo)
      temp<-goodness(
                pred.calib[pred.calib$season==i,c("obs","pred.fixed")]
                )
@@ -600,12 +590,15 @@ for (i in season.names) {
 ### Calculate goodness of fit for validation data set
 
 ```r
+#create pred df
 pred.valid<-d.valid
 pred.valid$obs<-log(pred.valid$flow)
 pred.valid$pred.fixed<-NA
 pred.valid$pred.mixed<-NA
 
 rm(goodness.fixed.valid,goodness.mixed.valid)
+
+#predict and calc goodness of fit metrics of fixed and mixed models, calibration set
 for (i in season.names) {
      pred.valid[pred.valid$season==i,"pred.fixed"]<-
           predict(m.fixed.season[[i]],
@@ -614,8 +607,6 @@ for (i in season.names) {
           predict(m.mixed.season[[i]],
                   newdata=pred.valid[pred.valid$season==i,],
                   allow.new.levels=T)
-#      boo<-pred.calib[pred.calib$season==i,c("obs","pred.fixed")]
-#      goodness(boo)
      temp<-goodness(
                pred.valid[pred.valid$season==i,c("obs","pred.fixed")]
                )
@@ -660,9 +651,9 @@ goodness.mixed.calib
 
 ```
   season sample.n  mean  RMSE NSEff bias percent.bias pearsonR CV.error
-1 winter      665 2.001 0.183 0.934    0            0    0.967    0.130
+1 winter      665 2.001 0.184 0.934    0            0    0.967    0.130
 2 spring      670 2.608 0.110 0.971    0            0    0.985    0.060
-3 summer      658 1.141 0.235 0.912    0            0    0.955    0.292
+3 summer      658 1.141 0.236 0.911    0            0    0.955    0.293
 4   fall      640 1.469 0.260 0.901    0            0    0.949    0.250
 ```
 
@@ -684,10 +675,10 @@ goodness.mixed.valid
 
 ```
   season sample.n  mean  RMSE NSEff   bias percent.bias pearsonR CV.error
-1 winter      120 1.922 0.267 0.804 -0.138       -7.191    0.913    0.183
-2 spring      122 2.279 0.254 0.838  0.029        1.276    0.916    0.158
-3 summer      121 1.086 0.341 0.825 -0.022       -1.986    0.910    0.446
-4   fall      118 1.370 0.391 0.807  0.086        6.255    0.905    0.400
+1 winter      120 1.922 0.259 0.816 -0.127       -6.606    0.917    0.179
+2 spring      122 2.279 0.254 0.839  0.029        1.279    0.916    0.157
+3 summer      121 1.086 0.331 0.835  0.086        7.921    0.918    0.425
+4   fall      118 1.370 0.392 0.806  0.085        6.203    0.904    0.401
 ```
 
 ### Melt data frames for ggplot
@@ -815,19 +806,6 @@ gg.error %+% subset(dd.valid, variable %in% c("obs","pred.mixed") & year %in% va
 ```
 
 ![plot of chunk error plots](figure/error plots2.png) 
-
-```r
-# 
-# for (i in season.names)
-#      print(
-#           gg.error %+% subset(dd.valid, variable %in% c("obs","pred.mixed") & year %in% val.year & season==i )+ ggtitle(paste("Validation:",capitalize(i)))
-#      )
-# 
-# for (i in season.names)
-#      print(
-#           gg.error %+% subset(dd.calib, variable %in% c("obs","pred.mixed") & year %in% sample.calib.year & season==i )+ ggtitle(paste("Calibration:",capitalize(i)))
-# )
-```
 
 
 
