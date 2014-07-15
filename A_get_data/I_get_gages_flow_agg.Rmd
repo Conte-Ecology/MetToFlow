@@ -13,20 +13,20 @@ flow_data_dir<-"C:/ALR/Model_processed_data/flow_daily"
 
 ```{r this script s end results}
 
-setwd(flow_data_dir)
-
-#gage-related
+# setwd(flow_data_dir)
+# 
+# # gage-related
 # load("date_template.Rdata")
-# date_template.Rdata                date.template, complete.cutoff
-# flow_retrieval_template.Rdata      containing qmatrix.names, gages, gages.all, gages.med, gages.small
-
+# # date_template.Rdata                date.template, complete.cutoff
+# # flow_retrieval_template.Rdata      containing qmatrix.names, gages, gages.all, gages.med, gages.small
+# 
 # # others, basic info on gage retrieval
 # # "flow_retrieval_log.txt" 
 # # "gages_site_no.txt"
-
-
-#flow timeseries
-
+# 
+# 
+# flow timeseries
+# 
 # 
 # load("qannual.Rdata")
 # load("qdaily.Rdata")

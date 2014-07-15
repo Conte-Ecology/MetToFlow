@@ -6,11 +6,22 @@ library(plyr)
 library(lubridate) #date/time functions
 library(EcoHydRology) #snow melt model
 library(DataCombine) #for lag and lead terms
+library(devtools)
 
 data_dir<-"C:/ALR/Data"
-flow_data_dir<-"C:/ALR/Model_processed_data/flow_daily"
+flow_data_dir<-"C:/ALR/Models_processed_data/flow_timeseries"
+model_dir<-"C:/ALR/Models/MetToFlow"
 
 proj4.GCS<-"+proj=longlat +ellps=GRS80 +datum=NAD83 +no_defs +towgs84=0,0,0 "
+
+
+#utility functions, load (source) from my saved gist
+source_gist("https://gist.github.com/anarosner/ba285306fc0ce9d812a5", sha1="b25a1b73e02cc2b2d2c590f6c0b2c9c9945fa980")
+setwd(file.path(model_dir,"A_get_data"))
+purl(input="0_general_functions.Rmd",output="0_general_functions.R",documentation=0)
+source("0_general_functions.R")
+file.remove("0_general_functions.R")
+
 ```
 
 ```{r results}
@@ -20,7 +31,7 @@ setwd(flow_data_dir)
 # load(file="gages_met_spatial.Rdata")
 # gages.met<-read.csv("gages_met.csv",stringsAsFactors=F,colClasses=c("site_no"="character"))
 
-# # #load met data
+# #load met data
 # setwd(flow_data_dir)
 # # load("climate_matrices.Rdata")          
 # load("cdaily.Rdata")          
@@ -30,6 +41,22 @@ setwd(flow_data_dir)
 
 ```
 
+```{r load required results from scripts I and II}
+setwd(flow_data_dir)
+load("gages_char_spatial.Rdata")    #contains gages.char.spatial
+load("date_template.Rdata")
+# # gage-related
+# load("date_template.Rdata")
+# # date_template.Rdata                date.template, complete.cutoff
+# # flow_retrieval_template.Rdata      containing qmatrix.names, gages, gages.all, gages.med, gages.small
+# gages_spatial.Rdata         contains gages.spatial
+# gages_char.csv              from gages.char.spatial@data
+
+# setwd(flow_data_dir)
+# gages.plotted<-read.csv("gages_plotted_info.csv")
+# load("gages_char_spatial.Rdata")
+
+```
 
 ```{r load mauer polygons linked gages w/ met data}
 
@@ -68,7 +95,7 @@ head(met.poly@data)
 #columns from mauer
 mauer.cols<-c("year", "month", "day","precip.mm", "tmax","tmin","wind")
 #precip_mm  tmax  tmin
-met.cols<-c("precip.mm","rain","melt","precip.e.lag1","precip.e.lag2","precip.e.lag3","tmin","tmax")
+met.cols<-c("precip.mm","rain","melt","precip.e","precip.e.lag1","precip.e.lag2","precip.e.lag3","tmin","tmax","tavg","pet","gdd","frozen")
           # store tavg?  effective precip?
 
 setwd(file.path(data_dir,"ClimateData/Mauer/daily/east"))
@@ -100,14 +127,15 @@ tail(met.template)
 ```{r set up met array}
 #create all four matrices
 cmatrix.names<-c("cdaily","cmonthly","cseasonal","cannual")
-met.filename.sorted<-sort(unique(gages.met$met_filename))
+met.filename.sorted<-sort(unique(gages.met.spatial$met_filename))
 head(met.filename.sorted)
 
 # save(cmatrix.names,met.filename.sorted,mauer.cols,met.cols,"sfafds")
 
 cmatrices<-list(length=4)
 
-for (k in 1:length(cmatrix.names)) {
+# for (k in 2:length(cmatrix.names)) {
+for (k in 3) {
      print(cmatrix.names[k])
      cmatrices[k][[1]]<-array(dim=c(   nrow(date.template[names(date.template)[k]][[1]]), 
                                        length(met.filename.sorted), 
@@ -126,6 +154,9 @@ for (k in 1:length(cmatrix.names)) {
 
 if(!exists("met.poly")) 
      met.poly<-readShapePoly(file.path(data_dir,"ClimateData/Mauer/met_poly_GCS"),proj4string=CRS(proj4.GCS))
+met.coord<-met.poly@data
+rm(met.poly)
+gc()
 
 setwd(file.path(data_dir,"ClimateData/Mauer/daily/east"))
 
@@ -141,23 +172,44 @@ setwd(file.path(data_dir,"ClimateData/Mauer/daily/east"))
 agg.function2<-function(df) return( c(precip.mm=sum(df$precip.mm),
                                         tmin=mean(df$tmin),
                                         tmax=mean(df$tmax),
-#                                         tavg=mean((df$tmax+df$tmin)/2),
+                                        tavg=mean(df$tavg),
+                                        pet=sum(df$pet),
+                                        gdd=sum(df$gdd),
+                                        frozen=sum(df$frozen),
                                         rain=sum(df$rain),
                                         melt=sum(df$melt),
                                         complete=sum(!is.na(df$precip.mm))>=cutoff))
 
 print(paste("### begin reading",length(met.filename.sorted),"met files"))
 for (i in 1:length(met.filename.sorted) ) {
-# for (i in 1:5 ) {
+
      print(i)
-     if(file.exists(met.filename.sorted[i])) {
-          x<-read.table(file=met.filename.sorted[i],col.names=mauer.cols)
+     if(file.exists(as.character(met.filename.sorted[i]))) {
+          print("    getting file")
+          x<-read.table(file=as.character(met.filename.sorted[i]),col.names=mauer.cols)
           x[,c( "date1","date","month.date","season.date","annual.date")]<- met.template[,c( "date1","date","month.date","season.date","annual.date")]
-          centroid<-met.poly@data[met.poly$file_nm==met.filename.sorted[i],]
+                                                                           #date1 is date format.  
+                                                                           #date, month.date, season.date, annual.date are characters, so they can be used as col names
+#           centroid<-met.poly@data[met.poly$file_nm==met.filename.sorted[i],]
+          centroid<-met.coord[met.coord$file_nm==met.filename.sorted[i],]
+          print("    calculating values")
           suppressWarnings(
                x.snow<-SnowMelt(Date=x$date1,precip_mm=x$precip.mm,Tmax_C=x$tmax,Tmin_C=x$tmin,lat_deg=centroid$y,windSp=x$wind,windHt=10))
           x[,c("rain","melt")]<-x.snow[,c("Rain_mm","SnowMelt_mm")]
-          for (j in 1:length(cmatrices) ){     
+          #PET_fromTemp(Jday, Tmax_C, Tmin_C, lat_radians)           
+          x[,"pet"]<-PET_fromTemp(Jday=yday(x$date),Tmax_C=x$tmax ,Tmin_C=x$tmin, lat_radians=centroid$y*pi/180)
+          x[,"tavg"]<-(x$tmin+x$tmax)/2
+          x[,"gdd"]<-sapply(x$tavg, FUN=function(y) max( y-10, 0) )
+          x[,"frozen"]<-sapply(x$tmin, FUN=function(y) y<=0)
+#           x[1:20,]
+#           x[90:110,]
+#           x[200:220,]
+#           
+          print("     start agg")
+#           for (j in 1:length(cmatrices) ){   
+          for (j in 3){     
+               print(paste("    ",names(date.template)[j]))
+               #skip daily aggregation (no aggregation), at least for now?
                cutoff<-complete.cutoff[j]     
                x.agg<-ddply(x, names(date.template)[j], agg.function2)
 #                sum(x.agg[,1]!=sort(x.agg[,1]))
@@ -177,6 +229,7 @@ for (i in 1:length(met.filename.sorted) ) {
      }
      else
           print(paste("MISSING FILE: can't find",i))
+     rm(x,x.agg,x.final,x.snow)
 }
 
 
@@ -186,27 +239,26 @@ for (i in 1:length(met.filename.sorted) ) {
 
 ```{r save matrices}
 setwd(flow_data_dir)
-
 save(cmatrices,file="climate_matrices.Rdata")
 
 
 
 #forgive me.... copy/paste
-cdaily<-cmatrices["cdaily"][[1]]
-str(cdaily)
-save(cdaily,file=paste0("cdaily.Rdata"))
-cmonthly<-cmatrices["cmonthly"][[1]]
-save(cmonthly,file=paste0("cmonthly.Rdata"))
+# cdaily<-cmatrices["cdaily"][[1]]
+# str(cdaily)
+# save(cdaily,file=paste0("cdaily.Rdata"))
+# cmonthly<-cmatrices["cmonthly"][[1]]
+# save(cmonthly,file=paste0("cmonthly.Rdata"))
 cseasonal<-cmatrices["cseasonal"][[1]]
 save(cseasonal,file=paste0("cseasonal.Rdata"))
-cannual<-cmatrices["cannual"][[1]]
-save(cannual,file=paste0("cannual.Rdata"))
+# cannual<-cmatrices["cannual"][[1]]
+# save(cannual,file=paste0("cannual.Rdata"))
 
 rm(met.poly)
 rm(x,x.snow,x.agg,met.template,centroid)
 # rm(cmatrices,cdaily)
 
-# gc()
+gc()
 ```
 
 

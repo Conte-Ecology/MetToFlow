@@ -24,6 +24,7 @@ zonal_stats_dir<-"C:/ALR/Models_from_others/Kyle/NH NY NHDplus basin zonal stats
 
 # setwd(flow_data_dir)
 # gages.plotted<-read.csv("gages_plotted_info.csv")
+# load("gages_char_spatial.Rdata")
 ```
 
 

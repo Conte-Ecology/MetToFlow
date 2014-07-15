@@ -1,54 +1,71 @@
 ```{r}
 library(knitr)
 
-model_data_dir<-"C:/ALR/Model_processed_data"
+model_data_dir<-"C:/ALR/Models_processed_data"
+model_dir<-"C:/ALR/Models/MetToFlow"
 
-setwd("C:/ALR/Models/CTRflows3/get_flow_data/daily_seasonal")  #hard coded directory name...change me
+
+setwd(file.path(model_dir,"A_get_data"))  #hard coded directory name...change me
 purl(input="0_general_functions.Rmd",output="0_general_functions.R",documentation=0)
 source("0_general_functions.R")
 file.remove("0_general_functions.R")
 ```
 
-```{r}
-#create df to merge flow/q and met/climate (into data/d)
-dannual1<-array(dim=c(dim(qannual)[1],nrow(gages.met.spatial),6))
-dimnames(dannual1)[[1]]<-dimnames(qannual)[[1]]
-dimnames(dannual1)[[2]]<-gages.met.spatial$site_no
-dimnames(dannual1)[[3]]<-c("rain","melt","precip.e.lag1","precip.e.lag2","precip.e.lag3","flow")
-#copy flows
-dannual1[,,"flow"]<-qannual[,gages.met.spatial$site_no,1]
+```{r load flow and climate agg timeseries}
 
-#loop through gages to pull appropriate climate/met data
-for (i in 1:dim(dannual1)[[2]]) {
-     j<-gages.met[gages.met$site_no== dimnames(dannual1)[[2]][i],"met_filename"]
-     print(j)
-     if (length(j)>0) {
-          dannual1[,i,1:5]<-cannual[,j,2:6]
-     }
-}
-#tail(dannual1[,10,],30) #view data for single(random) site
+setwd(file.path(model_data_dir,"flow_timeseries"))
+# load("qannual.Rdata")
+# load("cannual.Rdata")
+load("qseasonal.Rdata")
+load("cseasonal.Rdata")
 
-dannual2<-melt.3d(dannual1) #this is where site_no is being changed from char to numeric!
-dannual2<-subset(dannual2,!is.na(flow))
-dannual<-merge(dannual2,gages.char.spatial@data,by="site_no",all.x=T,all.y=F,sort=F)
-dannual$year<-year(as.Date(as.character(dannual$date)))
-# head(dannual)
-# str(dannual)
+load("gages_met_spatial.Rdata")
+load("gages_char_spatial.Rdata")
 
-save(dannual,file=file.path(model_data_dir,"dannual.Rdata"))
+```
+
+
+```{r }
+# #create df to merge flow/q and met/climate (into data/d)
+# dannual1<-array(dim=c(dim(qannual)[1],nrow(gages.met.spatial),6))
+# dimnames(dannual1)[[1]]<-dimnames(qannual)[[1]]
+# dimnames(dannual1)[[2]]<-gages.met.spatial$site_no
+# dimnames(dannual1)[[3]]<-c("rain","melt","precip.e.lag1","precip.e.lag2","precip.e.lag3","flow")
+# #copy flows
+# dannual1[,,"flow"]<-qannual[,gages.met.spatial$site_no,1]
+# 
+# #loop through gages to pull appropriate climate/met data
+# for (i in 1:dim(dannual1)[[2]]) {
+#      j<-gages.met.spatial@data[gages.met.spatial$site_no== dimnames(dannual1)[[2]][i],"met_filename"]
+#      print(j)
+#      if (length(j)>0) {
+#           dannual1[,i,1:5]<-cannual[,j,2:6]
+#      }
+# }
+# #tail(dannual1[,10,],30) #view data for single(random) site
+# 
+# dannual2<-melt.3d(dannual1) #this is where site_no is being changed from char to numeric!
+# dannual2<-subset(dannual2,!is.na(flow))
+# dannual<-merge(dannual2,gages.char.spatial@data,by="site_no",all.x=T,all.y=F,sort=F)
+# dannual$year<-year(as.Date(as.character(dannual$date)))
+# # head(dannual)
+# # str(dannual)
+# 
+# save(dannual,file=file.path(model_data_dir,"flow_timeseries","dannual.Rdata"))
 ```
 
 ```{r seasonal}
-dseasonal1<-array(dim=c(dim(qseasonal)[1],nrow(gages.met.spatial),6))
+dseasonal1<-array(dim=c(dim(qseasonal)[1],nrow(gages.met.spatial),dim(cseasonal)[3]+1))
 dimnames(dseasonal1)[[1]]<-dimnames(qseasonal)[[1]]
 dimnames(dseasonal1)[[2]]<-gages.met.spatial$site_no
-dimnames(dseasonal1)[[3]]<-c("rain","melt","precip.e.lag1","precip.e.lag2","precip.e.lag3","flow")
+dimnames(dseasonal1)[[3]]<-c("flow",dimnames(cseasonal)[[3]])
+     #c("rain","melt","precip.e.lag1","precip.e.lag2","precip.e.lag3","flow")
 dseasonal1[,,"flow"]<-qseasonal[,gages.met.spatial$site_no,1]
-for (i in 1:dim(dseasonal1)[[2]]) {
-     j<-gages.met[gages.met$site_no== dimnames(dseasonal1)[[2]][i],"met_filename"]
-     print(j)
-     if (length(j)>0) {
-          dseasonal1[,i,1:5]<-cseasonal[,j,2:6]
+for (i in 1:dim(dseasonal1)[[2]]) {  #loop gages
+     m<-as.character(gages.met.spatial@data[gages.met.spatial$site_no== dimnames(dseasonal1)[[2]][i],"met_filename"]) #get met filename
+     print(m)
+     if (length(m)>0) {
+          dseasonal1[,i,2:dim(dseasonal1)[[3]]]<-cseasonal[,m,]
      }
 }
 dseasonal2<-melt.3d(dseasonal1)
@@ -60,9 +77,12 @@ dseasonal$precip.e<-dseasonal$rain+dseasonal$melt
 
 
 head(dseasonal)
+
+dseasonal[100:120,]
 rm(dseasonal1,dseasonal2)
 str(dseasonal)
-save(dseasonal,file=file.path(model_data_dir,"dseasonal.Rdata"))
+setwd(file.path(model_data_dir,"flow_timeseries"))
+save(dseasonal,file="dseasonal.Rdata")
 ```
 
 ```{r}

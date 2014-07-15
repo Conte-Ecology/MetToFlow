@@ -13,6 +13,7 @@ library(ggplot2)
 library(reshape2)
 library(sp)
 library(devtools)
+library(xtable)
 
 
 model_dir<-"C:/ALR/Models/MetToFlow"
@@ -29,25 +30,26 @@ source_gist("https://gist.github.com/anarosner/ba285306fc0ce9d812a5", sha1="b25a
 setwd(file.path(model_data_dir,"flow_timeseries"))
 
 load("gages_char_spatial.Rdata")
-long_site_no<-gages.char.spatial$site_no[gages.char.spatial$qannual>=30 & gages.char.spatial$TNC_DamCount==0]
+long_site_no<-gages.char.spatial$site_no[gages.char.spatial$qseasonal>=110 & gages.char.spatial$TNC_DamCount==0 & gages.char.spatial$OnChannelWaterSqKM<0.5]
 length(long_site_no)
-View(t(gages.char.spatial@data[gages.char.spatial$site_no %in% long_site_no,]))
+```
+
+```{r print xtable of gage characteristics, results='asis'}
+# View(t(gages.char.spatial@data[gages.char.spatial$site_no %in% long_site_no,]))
+g<-t(gages.char.spatial@data[gages.char.spatial$site_no %in% long_site_no,])
+dimnames(g)[[2]]<-g["site_no",]
+print(xtable(g),type="html")
+
+```
+
+```{r load flow and precip data}
 
 load("dseasonal.Rdata")
 dseasonal.long<-dseasonal[dseasonal$site_no %in% long_site_no,]
 dseasonal.long<-subset(dseasonal.long,subset=!is.na(precip.e) & !is.na(precip.e.lag1) & !is.na(precip.e.lag2) )
 # dseasonal.long[is.na(dseasonal.long$precip.e.lag2),]
-# dim(dseasonal.long)
+dim(dseasonal.long)
 
-
-
-# 1 = Complete barrier to all fish (12+ feet)
-# 2 = Small dam barrier (1-12 feet)
-# 3 = Partial breach
-# 4 = Barrier with fish ladder
-# 5 = Unlikely barrier - fully breached, weir, under 1ft dam (also COND=NO DAM or COND=REM or COND=DEL)
-# 6 = Unknown, assumed full barriers
-# 7 = Locks
 ```
 
 ```{r}
@@ -76,7 +78,7 @@ weights
 ```
 
 ### compare precip vs flow quantiles from sites w long records
-```{r compare quantiles of sites w long records, fig.width=15, fig.height=10, warning=FALSE}
+```{r compare quantiles of sites w long records, warning=FALSE}
 
 # 4 sites, 4 seasons
 
@@ -135,7 +137,7 @@ unique(quant.melt$variable)
 ```
 
     
-```{r}
+```{r quantile plots, fig.width=15, fig.height=10}
 
 
 
@@ -150,7 +152,7 @@ for (i in capitalize(season.names)) {
           geom_line(subset=.(season==i),colour="grey50") + 
           geom_errorbar(limits,colour="grey30",lwd=1.1,subset=.(season==i)) +
           geom_point(pch=15,cex=3,subset=.(season==i)) +
-          facet_wrap(~site,nrow=2) + ggtitle(i)
+          facet_wrap(~site,ncol=2) + ggtitle(i)
      print(temp)
      
      print(
